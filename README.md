@@ -1,1 +1,1 @@
-# gameshop-item-catelog
+# gameshop-item-catalog
