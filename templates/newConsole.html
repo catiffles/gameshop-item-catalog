@@ -1,0 +1,11 @@
+{% extends "layout.html" %}
+{% block title %} Create a Console {% endblock %}
+{% block content %}
+  <h1>New Console</h1>
+  <form action="{{url_for('newConsole')}}", method='POST'>
+    <p>Name:</p>
+    <input type='text' size='30' name='name'>
+    <input type='submit' value='Create'>
+  </form>
+  <a href="{{url_for('index')}}">Cancel</a>
+{% endblock %}

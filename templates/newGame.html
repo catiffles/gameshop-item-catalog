@@ -1,0 +1,15 @@
+{% extends "layout.html" %}
+{% block title %} Create a Game {% endblock %}
+{% block content %}
+  <h1>New Game</h1>
+  <form action="{{url_for('newGame', console_id=console_id)}}", method='POST'>
+    <p>Name:</p>
+    <input type='text' size='30' name='name'>
+    <p>Price:</p>
+    <input type='text' size='8' name='price'>
+    <p>Description:</p>
+    <input type='text' size='250' name='description'>
+    <input type='submit' value='Create'>
+  </form>
+  <a href="{{url_for('gamesForConsole', console_id=console_id)}}">Cancel</a>
+{% endblock %}

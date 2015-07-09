@@ -1,0 +1,10 @@
+{% extends "layout.html" %}
+{% block title %}Delete a Game{% endblock %}
+{% block content %}
+  <h1>Are you sure you want to delete {{game.name}}?</h1>
+  <form action="{{url_for('deleteGame', console_id = console_id, game_id = game.id)}}" method='POST'>
+    <input type='submit', value='Delete'>
+  </form>
+
+  <a href="#">Cancel</a>
+{% endblock %}
