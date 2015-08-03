@@ -1,17 +1,255 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 from flask_bootstrap import Bootstrap
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, asc
 from sqlalchemy.orm import sessionmaker
-from database_setup import Console, Base, Game
+from database_setup import Console, Base, Game, User
+from flask import session as login_session
+import random
+import string
+from oauth2client.client import flow_from_clientsecrets
+from oauth2client.client import FlowExchangeError
+import httplib2
+import json
+from flask import make_response
+import requests
 
 app = Flask(__name__)
 Bootstrap(app)
 
+CLIENT_ID = json.loads(
+  open('client_secrets.json', 'r').read())['web']['client_id']
+APPLICATION_NAME = "GameShop Application"
+
+#Connect to database and create database session
 engine = create_engine('sqlite:///gamestore.db')
 Base.metadata.bind = engine
 
 DBSession = sessionmaker(bind=engine)
 session = DBSession()
+
+#Create anti-forgery state token
+@app.route('/login')
+def showLogin():
+  state = ''.join(random.choice(string.ascii_uppercase + string.digits)
+                    for x in xrange(32))
+  login_session['state'] = state
+  # return "The current session state is %s" % login_session['state']
+  return render_template('login.html', STATE=state)
+
+@app.route('/gconnect', methods=['POST'])
+def gconnect():
+    # Validate state token
+    if request.args.get('state') != login_session['state']:
+        response = make_response(json.dumps('Invalid state parameter.'), 401)
+        response.headers['Content-Type'] = 'application/json'
+        return response
+    # Obtain authorization code
+    code = request.data
+
+    try:
+        # Upgrade the authorization code into a credentials object
+        oauth_flow = flow_from_clientsecrets('client_secrets.json', scope='')
+        oauth_flow.redirect_uri = 'postmessage'
+        credentials = oauth_flow.step2_exchange(code)
+    except FlowExchangeError:
+        response = make_response(
+            json.dumps('Failed to upgrade the authorization code.'), 401)
+        response.headers['Content-Type'] = 'application/json'
+        return response
+
+    # Check that the access token is valid.
+    access_token = credentials.access_token
+    url = ('https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=%s'
+           % access_token)
+    h = httplib2.Http()
+    result = json.loads(h.request(url, 'GET')[1])
+    # If there was an error in the access token info, abort.
+    if result.get('error') is not None:
+        response = make_response(json.dumps(result.get('error')), 500)
+        response.headers['Content-Type'] = 'application/json'
+
+    # Verify that the access token is used for the intended user.
+    gplus_id = credentials.id_token['sub']
+    if result['user_id'] != gplus_id:
+        response = make_response(
+            json.dumps("Token's user ID doesn't match given user ID."), 401)
+        response.headers['Content-Type'] = 'application/json'
+        return response
+
+    # Verify that the access token is valid for this app.
+    if result['issued_to'] != CLIENT_ID:
+        response = make_response(
+            json.dumps("Token's client ID does not match app's."), 401)
+        print "Token's client ID does not match app's."
+        response.headers['Content-Type'] = 'application/json'
+        return response
+
+    stored_credentials = login_session.get('credentials')
+    stored_gplus_id = login_session.get('gplus_id')
+    if stored_credentials is not None and gplus_id == stored_gplus_id:
+        response = make_response(json.dumps('Current user is already connected.'),
+                                 200)
+        response.headers['Content-Type'] = 'application/json'
+        return response
+
+    # Store the access token in the session for later use.
+    login_session['provider'] = 'google'
+    login_session['credentials'] = credentials.access_token
+    login_session['gplus_id'] = gplus_id
+
+    # Get user info
+    userinfo_url = "https://www.googleapis.com/oauth2/v1/userinfo"
+    params = {'access_token': credentials.access_token, 'alt': 'json'}
+
+    answer = requests.get(userinfo_url, params=params)
+
+    data = answer.json()
+
+    login_session['username'] = data['name']
+    login_session['picture'] = data['picture']
+    login_session['email'] = data['email']
+
+    #see if user exists, if it doesn't, create user locally
+    user_id = getUserID(login_session['email'])
+    if not user_id:
+      user_id = createUser(login_session)
+    login_session['user_id'] = user_id
+
+    output = ''
+    output += '<h1>Welcome, '
+    output += login_session['username']
+    output += '!</h1>'
+    output += '<img src="'
+    output += login_session['picture']
+    output += ' " style = "width: 300px; height: 300px;border-radius: 150px;-webkit-border-radius: 150px;-moz-border-radius: 150px;"> '
+    flash("you are now logged in as %s" % login_session['username'])
+    print "done!"
+    return output
+
+ # DISCONNECT - Revoke a current user's token and reset their login_session
+
+@app.route('/gdisconnect')
+def gdisconnect():
+        # Only disconnect a connected user.
+    credentials = login_session.get('credentials')
+    if credentials is None:
+        response = make_response(
+            json.dumps('Current user not connected.'), 401)
+        response.headers['Content-Type'] = 'application/json'
+        return response
+    access_token = login_session.get('credentials')
+    url = 'https://accounts.google.com/o/oauth2/revoke?token=%s' % access_token
+    h = httplib2.Http()
+    result = h.request(url, 'GET')[0]
+
+    if result['status'] == '200':
+        # Reset the user's sesson.
+        del login_session['credentials']
+        del login_session['gplus_id']
+        del login_session['username']
+        del login_session['email']
+        del login_session['picture']
+
+        response = make_response(json.dumps('Successfully disconnected.'), 200)
+        response.headers['Content-Type'] = 'application/json'
+        return response
+    else:
+        # For whatever reason, the given token was invalid.
+        response = make_response(
+            json.dumps('Failed to revoke token for given user.', 400))
+        response.headers['Content-Type'] = 'application/json'
+        return response
+
+@app.route('/fbconnect', methods=['POST'])
+def fbconnect():
+  if request.args.get('state') != login_session['state']:
+    response = make_response(json.dumps('Invalid state parameter.'), 401)
+    response.headers['Content-Type'] = 'application/json'
+    return response
+  access_token = request.data
+
+  #Exchange client token for long-lived server-side token with GET /oauth/access_token?grant_type=fb_exchange_token&client_id={app-id}&client_secret={app-secret}&fb_exchange_token={short-lived-token}
+  app_id = json.loads(open('fb_client_secrets.json', 'r').read())['web']['app_id']
+  app_secret = json.loads(open('fb_client_secrets.json', 'r').read())['web']['app_secret']
+  url = 'https://graph.facebook.com/oauth/access_token?grant_type=fb_exchange_token&client_id=%s&client_secret=%s&fb_exchange_token=%s' % (app_id, app_secret, access_token)
+  h = httplib2.Http()
+  result = h.request(url, 'GET')[1]
+
+  #Use token to get user info from API
+  userinfo_url = "https://graph.facebook.com/v2.2/me"
+  #Strip expire tag from access token
+  token = result.split("&")[0]
+
+  url = 'https://graph.facebook.com/v2.2/me?%s' % token
+  h = httplib2.Http()
+  result = h.request(url, 'GET')[1]
+
+  #print "url sent for API access:%s" % url
+  #print "API JSON result: %s" % result
+  data = json.loads(result)
+  login_session['provider'] = 'facebook'
+  login_session['username'] = data['name']
+  login_session['email'] = data['email']
+  login_session['facebook_id'] = data['id']
+
+  #Get user picture
+  url = 'https://graph.facebook.com/v2.2/me/picture?%s&redirect=0&height=200&width=200' % token
+  h = httplib2.Http()
+  result = h.request(url, 'GET')[1]
+  data = json.loads(result)
+
+  login_session['picture'] = data['data']['url']
+
+  #see if user exists
+  user_id = getUserID(login_session['email'])
+  if not user_id:
+    user_id = createUser(login_session)
+  login_session['user_id'] = user_id
+
+  output = ''
+  output += '<h1>Welcome, '
+  output += login_session['username']
+
+  output += '!</h1>'
+  output += '<img src="'
+  output += login_session['picture']
+  output += '" style = "width: 300px; height: 300px; border-radius: 150px; -webkit-border-radius: 150px; -moz-border radius: 150px; "> '
+  flash('Now logged in as %s' % login_session['username'])
+  return output
+
+@app.route('/fbdisconnect')
+def fbdisconnect():
+  facebook_id = login_session['facebook_id']
+  url = 'https://graph.facebook.com/%s/permissions' % facebook_id
+  h = httplib2.Http()
+  result = h.request(url, 'DELETE')[1]
+  del login_session['username']
+  del login_session['email']
+  del login_session['picture']
+  del login_session['user_id']
+  del login_session['facebook_id']
+  return "You have been logged out"
+
+@app.route('/disconnect')
+def disconnect():
+  if 'provider' in login_session:
+    if login_session['provider'] == 'google':
+      gdisconnect()
+      del login_session['gplus_id']
+      del login_session['credentials']
+    if login_session['provider'] == 'facebook':
+      fbdisconnect()
+      del login_session['facebook_id']
+
+    del login_session['username']
+    del login_session['email']
+    del login_session['picture']
+    del login_session['provider']
+    flash("You have successfully been logged out.")
+    return redirect(url_for('showConsoles'))
+  else:
+    flash("You were not logged in to begin with!")
+    return redirect(url_for('showConsoles'))
 
 #API Endpoints (Get Request)
 @app.route('/json/consoles/')
@@ -35,12 +273,18 @@ def gameJSON(console_id, game_id):
 @app.route('/consoles/')
 def index():
   consoles = session.query(Console).all()
-  return render_template('consoles.html', consoles=consoles)
+  if 'username' not in login_session:
+    return render_template('publicconsoles.html', consoles=consoles)
+  else:
+    return render_template('consoles.html', consoles=consoles)
 
+#Create a new console
 @app.route('/consoles/new/', methods=['GET', 'POST'])
 def newConsole():
+  if 'username' not in login_session:
+    return redirect('/login')
   if request.method == 'POST':
-    newConsole = Console(name=request.form['name'])
+    newConsole = Console(name=request.form['name'], user_id=login_session['user_id'])
     session.add(newConsole)
     session.commit()
     flash("New Console Created!")
@@ -51,6 +295,10 @@ def newConsole():
 @app.route('/consoles/<int:console_id>/edit/', methods=['GET', 'POST'])
 def editConsole(console_id):
   editedConsole = session.query(Console).filter_by(id=console_id).one()
+  if 'username' not in login_session:
+    return redirect('/login')
+  if editedConsole.user_id != login_session['user_id']:
+    return "<script>function myFunction() {alert('You are not authorized to edit this console. Please create your own console in order to edit.');}</script><body onload='myFunction()''>"
   if request.method == 'POST':
     if request.form['name']:
       editedConsole.name = request.form['name']
@@ -66,6 +314,10 @@ def editConsole(console_id):
 @app.route('/consoles/<int:console_id>/delete/', methods=['GET', 'POST'])
 def deleteConsole(console_id):
   deletedConsole = session.query(Console).filter_by(id=console_id).one()
+  if 'username' not in login_session:
+    return redirect('/login')
+  if deletedConsole.user_id != login_session['user_id']:
+      return "<script>function myFunction() {alert('You are not authorized to delete this console. Please create your own console in order to delete');}</script><body onload='myFunction()''>"
   if request.method == 'POST':
     session.delete(deletedConsole)
     session.commit()
@@ -78,11 +330,21 @@ def deleteConsole(console_id):
 @app.route('/consoles/<int:console_id>/games')
 def gamesForConsole(console_id):
   console = session.query(Console).filter_by(id=console_id).one()
+  creator = getUserInfo(console.user_id)
   games = session.query(Game).filter_by(console_id=console.id)
-  return render_template('games.html', console=console, games=games)
+  if 'username' not in login_session or creator.id != login_session['user_id']:
+    return render_template('publicgames.html', games=games, console=console, creator=creator)
+  else:
+    return render_template('games.html', console=console, games=games, creator=creator)
 
+#Create a new game
 @app.route('/consoles/<int:console_id>/games/new', methods=['GET', 'POST'])
 def newGame(console_id):
+  if 'username' not in login_session:
+    return redirect('/login')
+  console = session.query(Console).filter_by(id=console_id).one()
+  if login_session['user_id'] != console.user_id:
+        return "<script>function myFunction() {alert('You are not authorized to add games to this console. Please create your own console in order to add games.');}</script><body onload='myFunction()''>"
   if request.method == 'POST':
     newGame = Game(name=request.form['name'], price=request.form['price'], description=request.form['description'], console_id=console_id)
     session.add(newGame)
@@ -92,9 +354,15 @@ def newGame(console_id):
   else:
     return render_template('newGame.html', console_id=console_id)
 
+#Edit a game
 @app.route('/consoles/<int:console_id>/games/<int:game_id>/edit', methods=['GET', 'POST'])
 def editGame(console_id, game_id):
+  if 'username' not in login_session:
+    return redirect('/login')
   editedGame = session.query(Game).filter_by(id=game_id).one()
+  console = session.query(Console).filter_by(id=console_id).one()
+  if login_session['user_id'] != console.user_id:
+        return "<script>function myFunction() {alert('You are not authorized to edit games on this console. Please create your own console in order to edit games.');}</script><body onload='myFunction()''>"
   if request.method == 'POST':
     if request.form['name']:
       editedGame.name = request.form['name']
@@ -111,7 +379,12 @@ def editGame(console_id, game_id):
 
 @app.route('/consoles/<int:console_id>/games/<int:game_id>/delete', methods=['GET', 'POST'])
 def deleteGame(console_id, game_id):
+  if 'username' not in login_session:
+    return redirect('/login')
+  console = session.query(Console).filter_by(id=console_id).one()
   gameToDelete = session.query(Game).filter_by(id=game_id).one()
+  if login_session['user_id'] != console.user_id:
+        return "<script>function myFunction() {alert('You are not authorized to delete games on this console. Please create your own console in order to delete games.');}</script><body onload='myFunction()''>"
   if request.method == 'POST':
     session.delete(gameToDelete)
     session.commit()
@@ -119,6 +392,25 @@ def deleteGame(console_id, game_id):
     return redirect(url_for('gamesForConsole', console_id=console_id))
   else:
     return render_template('deleteGame.html', game=gameToDelete)
+
+def getUserID(email):
+  try:
+    user = session.query(User).filter_by(email = email).one()
+    return user.id
+  except:
+    return None
+
+def getUserInfo(user_id):
+  user = session.query(User).filter_by(id = user_id).one()
+  return user
+
+def createUser(login_session):
+  newUser = User(name = login_session['username'], email = login_session['email'], picture = login_session['picture'])
+  session.add(newUser)
+  session.commit()
+  user = session.query(User).filter_by(id = user_id).one()
+  user.session.query(User).filter_by(email = login_session['email']).one()
+  return user.id
 
 if __name__ == '__main__':
   app.secret_key = 'cow'

@@ -1,0 +1,24 @@
+{% extends "layout.html" %}
+{% block title %} Gameshop {% endblock %}
+
+{% block content %}
+
+  <p>All the consoles!</p>
+  <div class = 'flash'>
+    {% with messages = get_flashed_messages() %}
+    {% if messages %}
+      <ul>
+        {% for message in messages %}
+          <li><strong>{{message}}</strong></li>
+        {% endfor %}
+      </ul>
+        {% endif %}
+    {% endwith%}
+  </div>
+
+  {% for console in consoles %}
+  <div class = 'name'>
+    <p><a href='{{url_for('gamesForConsole', console_id=console.id)}}'>{{console.name}}</a> | <a href='{{url_for('editConsole', console_id=console.id)}}'>Edit</a> | <a href='{{url_for('deleteConsole', console_id=console.id)}}'>Delete</a></p>
+  {% endfor %}
+{% endblock %}
+

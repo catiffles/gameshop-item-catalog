@@ -14,10 +14,31 @@ Base = declarative_base()
 
 #class
 
+class User(Base):
+    __tablename__ = 'user'
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(250), nullable=False)
+    email = Column(String(250), nullable=False)
+    picture = Column(String(250))
+
+    @property
+    def serialize(self):
+        return {
+        'id' : self.id,
+        'name' : self.name,
+        'email' :self.email,
+        'picture' : self.picture
+        }
+
+
 class Console(Base):
   __tablename__ = 'console'
   name = Column(String(80), nullable = False)
   id = Column(Integer, primary_key = True)
+
+  user_id = Column(Integer, ForeignKey('user.id'))
+  user = relationship(User)
 
   @property
   def serialize(self):
@@ -35,6 +56,8 @@ class Game(Base):
 
   console_id = Column(Integer, ForeignKey('console.id'))
   console = relationship(Console)
+  user_id = Column(Integer, ForeignKey('user.id'))
+  user = relationship(User)
 
   @property
   def serialize(self):
