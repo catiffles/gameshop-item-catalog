@@ -4,11 +4,11 @@
   <h1>Edit Game Name</h1>
   <form action="{{url_for('editGame', console_id=console_id, game_id=game.id)}}" method='POST'>
     <p>Name:</p>
-      <input type='text' size='30' name='name' placeholder='{{game.name}}'>
+      <input type='text' size='30' name='name' value='{{game.name}}'>
     <p>Price:</p>
-      <input type='text' size='8' name='price' placeholder='{{game.price}}'>
+      <input type='text' size='8' name='price' value='{{game.price}}'>
     <p>Description:</p>
-      <input type='text' size='250' name='description' placeholder='{{game.description}}'>
+      <input type='text' size='250' name='description' value='{{game.description}}'>
 
       <input type='submit' value='Edit'>
   </form>

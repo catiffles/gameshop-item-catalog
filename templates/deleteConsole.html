@@ -1,7 +1,7 @@
 {% extends "layout.html" %}
 {% block title %} Delete a Console {% endblock %}
 {% block content %}
-  <h1>Are you sure you want to delete {{c.name}}?</h1>
+  <h1>Are you sure you want to delete {{console.name}}?</h1>
   <form action="{{url_for('deleteConsole', console_id = console.id)}}" method='POST'>
     <input type='submit', value='Delete'>
   </form>

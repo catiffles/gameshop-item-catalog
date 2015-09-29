@@ -149,9 +149,6 @@ def gdisconnect():
         # Reset the user's sesson.
         del login_session['credentials']
         del login_session['gplus_id']
-        del login_session['username']
-        del login_session['email']
-        del login_session['picture']
 
         response = make_response(json.dumps('Successfully disconnected.'), 200)
         response.headers['Content-Type'] = 'application/json'
@@ -163,7 +160,7 @@ def gdisconnect():
         response.headers['Content-Type'] = 'application/json'
         return response
 
-
+# Facebook connect
 @app.route('/fbconnect', methods=['POST'])
 def fbconnect():
     if request.args.get('state') != login_session['state']:
@@ -229,16 +226,13 @@ def fbconnect():
     flash('Now logged in as %s' % login_session['username'])
     return output
 
-
+# Disconnect from Facebook
 @app.route('/fbdisconnect')
 def fbdisconnect():
     facebook_id = login_session['facebook_id']
     url = 'https://graph.facebook.com/%s/permissions' % facebook_id
     h = httplib2.Http()
     result = h.request(url, 'DELETE')[1]
-    del login_session['username']
-    del login_session['email']
-    del login_session['picture']
     del login_session['user_id']
     del login_session['facebook_id']
     return "You have been logged out"
@@ -249,21 +243,19 @@ def disconnect():
     if 'provider' in login_session:
         if login_session['provider'] == 'google':
             gdisconnect()
-            del login_session['gplus_id']
-            del login_session['credentials']
         if login_session['provider'] == 'facebook':
             fbdisconnect()
-            del login_session['facebook_id']
 
+        del login_session['provider']
         del login_session['username']
         del login_session['email']
         del login_session['picture']
-        del login_session['provider']
+
         flash("You have successfully been logged out.")
-        return redirect(url_for('showConsoles'))
+        return redirect(url_for('index'))
     else:
         flash("You were not logged in to begin with!")
-        return redirect(url_for('showConsoles'))
+        return redirect(url_for('index'))
 
 
 # API Endpoints (Get Request)
@@ -289,6 +281,7 @@ def gameJSON(console_id, game_id):
     return jsonify(Game=[game.serialize])
 
 
+# Index page
 @app.route('/')
 @app.route('/consoles/')
 def index():
@@ -311,6 +304,7 @@ def newConsole():
         return render_template('newConsole.html')
 
 
+# Edit a console
 @app.route('/consoles/<int:console_id>/edit/', methods=['GET', 'POST'])
 def editConsole(console_id):
     editedConsole = session.query(Console).filter_by(id=console_id).one()
@@ -332,6 +326,7 @@ def editConsole(console_id):
     return render_template('editConsole.html')
 
 
+# Deletes a console
 @app.route('/consoles/<int:console_id>/delete/', methods=['GET', 'POST'])
 def deleteConsole(console_id):
     deletedConsole = session.query(Console).filter_by(id=console_id).one()
@@ -346,13 +341,13 @@ def deleteConsole(console_id):
         return render_template('deleteConsole.html', console=deletedConsole)
 
 
+# Shows list of all games related to a console
 @app.route('/consoles/<int:console_id>/')
 @app.route('/consoles/<int:console_id>/games')
 def gamesForConsole(console_id):
     console = session.query(Console).filter_by(id=console_id).one()
     games = session.query(Game).filter_by(console_id=console.id)
-    if 'username' not in login_session:
-        return render_template('games.html', console=console, games=games)
+    return render_template('games.html', console=console, games=games)
 
 
 # Create a new game
@@ -400,7 +395,7 @@ def editGame(console_id, game_id):
             game_id=game_id,
             game=editedGame)
 
-
+# Delete a game
 @app.route('/consoles/<int:console_id>/games/<int:game_id>/delete', methods=['GET', 'POST'])
 def deleteGame(console_id, game_id):
     if 'username' not in login_session:
@@ -415,7 +410,7 @@ def deleteGame(console_id, game_id):
     else:
         return render_template('deleteGame.html', game=gameToDelete)
 
-
+# Get user ID by email
 def getUserID(email):
     try:
         user = session.query(User).filter_by(email=email).one()
@@ -423,12 +418,12 @@ def getUserID(email):
     except:
         return None
 
-
+# Get user info by user ID
 def getUserInfo(user_id):
     user = session.query(User).filter_by(id=user_id).one()
     return user
 
-
+# Create a new user
 def createUser(login_session):
     newUser = User(
         name=login_session['username'],
@@ -436,8 +431,7 @@ def createUser(login_session):
         picture=login_session['picture'])
     session.add(newUser)
     session.commit()
-    user = session.query(User).filter_by(id=user_id).one()
-    user.session.query(User).filter_by(email=login_session['email']).one()
+    user = session.query(User).filter_by(email=login_session['email']).one()
     return user.id
 
 

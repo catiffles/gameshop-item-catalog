@@ -19,10 +19,6 @@ class User(Base):
     name = Column(String(250), nullable=False)
     email = Column(String(250), nullable=False)
     picture = Column(String(250))
-    access_token = Column(String(200))
-
-    def __init__(self, access_token):
-        self.access_token = access_token
 
     @property
     def serialize(self):
@@ -55,7 +51,7 @@ class Game(Base):
     description = Column(String(250))
 
     console_id = Column(Integer, ForeignKey('console.id'))
-    console = relationship(Console)
+    console = relationship(Console, single_parent=True, cascade='all, delete-orphan')
 
     @property
     def serialize(self):
