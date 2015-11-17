@@ -185,7 +185,7 @@ def fbconnect():
     # Strip expire tag from access token
     token = result.split("&")[0]
 
-    url = 'https://graph.facebook.com/v2.2/me?%s' % token
+    url = 'https://graph.facebook.com/v2.2/me?%s&fields=name,id,email' % token
     h = httplib2.Http()
     result = h.request(url, 'GET')[1]
 
